@@ -1,0 +1,134 @@
+
+
+
+> Written with [StackEdit](https://stackedit.io/).
+@ zhangshengliang
+
+# 单节点portgres安装
+## 安装准备
+（1）ubantu 
+（2）oracle box
+（3）postgres xl
+
+
+本地hosts文件配置：
+```
+192.168.56.101 linux01
+```
+依赖包安装：
+```
+apt-get install bison
+apt-get install flex
+```
+编译配置：
+```
+./configure -prefix=/home/pgxc/postgres --without-zlib --without-readline
+```
+安装：
+```
+make & make install
+```
+环境变量：
+```
+export PGHOME=/home/pgxc/postgres
+export PGDATA=/home/pgxc/postgres/DATA
+export LD_LIBRARY_PATH=$PGHOME/lib:$LD_LIBRARY_PATH
+export PATH=$PATH:$PGHOME/bin
+
+
+su pgxc
+source /home/pgxc/novrc
+```
+
+单节点安装安装：
+初始化：gtm cn dn
+```
+initgtm -Z gtm -D $PGDATA/gtm
+initdb -D $PGDATA/coord1 --nodename cn1
+initdb -D $PGDATA/datanode1 --nodename dn1
+```
+启动脚本：
+```
+#!bash
+source /home/pgxc/novrc
+```
+
+修改$PGDATA/gtm/gtm.conf配置文件，将gtm端口改为8800
+```
+nodename = 'gtm'
+listen_addresses = '*'
+port = 8800
+startup = ACT
+log_file = gtm.log   #方便问题定位
+```
+修改cn配置文件
+```
+$PGDATA/coord1/postgresql.conf   
+listen_addresses = '*'
+port = 8810
+pooler_port = 8815
+gtm_host = 'linux01'
+gtm_port = 8800
+pgxc_node_name = 'cn1'
+log_directory = 'pg_log'
+```
+修改dn1的配置文件
+```
+listen_addresses = '*'
+port = 8820
+pooler_port = 8818
+gtm_host = 'linux01'
+gtm_port = 8800
+pgxc_node_name = 'dn1'
+log_directory = 'pg_log'
+```
+
+修改权限文件：
+DN CN 均需要修改
+```
+$PDATA/coord1/pg_hba.conf
+            local database username address  option
+host all                all              linux01  trust
+host all                all              192.168.56.1/32  trust（本地地址添加）
+```
+
+启动gtm
+```
+gtm_ctl start -Z gtm -D $PGDATA/gtm
+```
+启动 datanode
+```
+pg_ctl restart -Z datanode -D $PGDATA/datanode1
+ ```
+启动coordinator
+```
+pg_ctl restart -Z coordinator -D $PGDATA/coord1
+```
+
+CN配置：
+```
+psql -p 8810 -d postgres
+CREATE NODE cn1 WITH (TYPE='coordinator',HOST='linux01',PORT=8810);
+CREATE NODE dn1 WITH (TYPE='datanode',HOST='linux01',PORT=8820,primary=true,preferred=true);
+```
+
+DN配置
+```
+psql -p 8820 -d postgres
+CREATE NODE cn1 WITH (TYPE='coordinator',HOST='linux01',PORT=8810);
+CREATE NODE dn1 WITH (TYPE='datanode',HOST='linux01',PORT=8820,primary=true,preferred=true);
+```
+
+node1.cn1上执行：
+```
+psql -p 8810 -d postgres
+ 
+select version();
+create user pgtest password 'pgtest';
+show max_connections; 最大连接数
+select * from pg_stat_activity; 查询连接状态
+ 
+create database pgtest_db with owner = pgtest;   创建数据库
+create table t1(id int,name text) distribute by hash(id); 创建表
+```
+
